@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+*.log
+.env.x
+
+.env*
+!.env.example
+server.log
+*.png
