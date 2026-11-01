@@ -21,7 +21,7 @@ function parseSitemap(xml) {
   return { sitemaps: sitemaps.filter((s) => s.loc), urls: urls.filter((u) => u.loc) };
 }
 
-export async function discoverUrls(input, { signal, log }) {
+export async function discoverUrls(input, { signal, log, maxPosts }) {
   const start = new URL(input);
   const origin = start.origin;
   const candidates = [];
@@ -58,7 +58,7 @@ export async function discoverUrls(input, { signal, log }) {
   const fallback = !content.length;
   if (fallback) content = list;
   content.sort((a, b) => (Date.parse(b.lastmod) || 0) - (Date.parse(a.lastmod) || 0));
-  return { total: all.size, contentCount: content.length, fallback, picked: content.slice(0, MAX_POSTS) };
+  return { total: all.size, contentCount: content.length, fallback, picked: content.slice(0, maxPosts ?? MAX_POSTS), content: content.slice(0, 5000) };
 }
 
 /* ---------------------------- 2. Scrape ---------------------------- */
@@ -87,7 +87,7 @@ export async function scrapePost(u, { signal }) {
 /* ---------------------------- 3. Topics ---------------------------- */
 const STOP = new Set(("a an the and or but if then else for to of in on at by with from as is are was were be been being this that these those it its your you we our us they their them how what why when where which who whom will can could should would may might must do does did done not no yes vs via into over under about more most less least very just than so such also using use used guide complete ultimate introduction intro part new best tips top way ways get getting make making build building learn learning step steps everything need know first now here there all any each every other some own same out up down one two three blog post posts article read announcing announcement today launch week day update updates feature features copy link heading permalink anchor section click here docs pages page knowledge base changelog mastering moving scale scaling deep dive faster easier ease simple simplifying better great now supports support introducing")
   .split(/\s+/));
-const TECH = new Set("postgres postgresql pgbouncer supavisor rls sql nosql redis kafka graphql rest grpc websocket websockets react nextjs next.js vue svelte nuxt remix astro vite webpack turbopack node nodejs deno bun typescript javascript python rust go golang java kotlin swift docker kubernetes k8s terraform aws gcp azure vercel netlify cloudflare edge serverless lambda middleware auth oauth jwt sso saml api sdk cli llm ai rag embeddings vector pgvector openai cache caching cdn ssr isr ssg hydration migration migrations indexes index replication sharding pooling connection realtime storage s3 webhooks cron queue queues postgis prisma drizzle supabase firebase mongodb mysql sqlite clickhouse duckdb tailwind css html wasm ci cd github actions oidc".split(" "));
+export const TECH = new Set("postgres postgresql pgbouncer supavisor rls sql nosql redis kafka graphql rest grpc websocket websockets react nextjs next.js vue svelte nuxt remix astro vite webpack turbopack node nodejs deno bun typescript javascript python rust go golang java kotlin swift docker kubernetes k8s terraform aws gcp azure vercel netlify cloudflare edge serverless lambda middleware auth oauth jwt sso saml api sdk cli llm ai rag embeddings vector pgvector openai cache caching cdn ssr isr ssg hydration migration migrations indexes index replication sharding pooling connection realtime storage s3 webhooks cron queue queues postgis prisma drizzle supabase firebase mongodb mysql sqlite clickhouse duckdb tailwind css html wasm ci cd github actions oidc".split(" "));
 
 function tokens(s) { return (s.toLowerCase().match(/[a-z0-9][a-z0-9.+#-]*[a-z0-9+#]|[a-z0-9]/g) || []).filter((t) => t.length > 1 && !STOP.has(t) && !/^[\d.]+$/.test(t) && !/^v?\d+(\.\d+)*$/.test(t)); }
 
@@ -249,7 +249,7 @@ export function scorePost(post, items, brand = "") {
 }
 
 /* ---------------------------- 6. Narrative ---------------------------- */
-const SRC_LABEL = { reddit: "Reddit", github: "GitHub", hn: "Hacker News", x: "X" };
+const SRC_LABEL = { reddit: "Reddit", github: "GitHub", hn: "Hacker News", x: "X", web: "Web", so: "Stack Overflow", devto: "dev.to" };
 const rel = (t) => { const h = Math.round((Date.now() - t) / 3600000); return h < 48 ? `${h}h ago` : `${Math.round(h / 24)}d ago`; };
 
 export function templateNarrative(post, s) {

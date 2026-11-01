@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Radar, FileSearch, AlertTriangle, Gauge, Play, Loader2, Terminal, CheckCircle2, Circle, ChevronDown, Copy, Check,
   Search, GitBranch, MessageSquare, AtSign, Settings, LayoutGrid, Workflow, Tag, Quote, Lightbulb, Clock, ExternalLink,
-  ArrowUpDown, Sparkles, Flame, Square, KeyRound, Wifi, XCircle,
+  ArrowUpDown, Sparkles, Flame, Square, KeyRound, Wifi, XCircle, Globe, HelpCircle, Newspaper, Swords,
 } from "lucide-react";
 
 const PIPELINE_STEPS = [
@@ -13,14 +13,19 @@ const SEVERITY = {
   critical: { label: "Critical", cls: "bg-rose-500/15 text-rose-300 ring-rose-500/30", rank: 4 },
   high: { label: "High", cls: "bg-amber-500/15 text-amber-300 ring-amber-500/30", rank: 3 },
   medium: { label: "Medium", cls: "bg-indigo-500/15 text-indigo-300 ring-indigo-500/30", rank: 2 },
-  low: { label: "Healthy", cls: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30", rank: 1 },
+  low: { label: "Minor gap", cls: "bg-sky-500/15 text-sky-300 ring-sky-500/30", rank: 1 },
+  none: { label: "No active gap", cls: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30", rank: 0 },
 };
 const SOURCE = {
   x: { label: "X", Icon: AtSign, cls: "bg-zinc-100/10 text-zinc-200 ring-zinc-400/30" },
   reddit: { label: "Reddit", Icon: MessageSquare, cls: "bg-orange-500/15 text-orange-300 ring-orange-500/30" },
   github: { label: "GitHub", Icon: GitBranch, cls: "bg-violet-500/15 text-violet-300 ring-violet-500/30" },
   hn: { label: "Hacker News", Icon: Flame, cls: "bg-amber-500/15 text-amber-300 ring-amber-500/30" },
+  web: { label: "Web", Icon: Globe, cls: "bg-sky-500/15 text-sky-300 ring-sky-500/30" },
+  so: { label: "Stack Overflow", Icon: HelpCircle, cls: "bg-yellow-500/15 text-yellow-300 ring-yellow-500/30" },
+  devto: { label: "dev.to", Icon: Newspaper, cls: "bg-zinc-100/10 text-zinc-200 ring-zinc-400/30" },
 };
+const BADGE_ONLY = { competitor: { label: "Competitor", Icon: Swords, cls: "bg-fuchsia-500/15 text-fuchsia-300 ring-fuchsia-500/30" } };
 const ERRORS = {
   NO_SITEMAP: "No sitemap found", BLOCKED: "Site blocked the scraper", RATE_LIMITED: "Rate limited", BAD_URL: "Invalid URL",
   SSRF_BLOCKED: "Address not allowed", BUSY: "Server busy", CANCELLED: "Scan cancelled", SCRAPE_FAILED: "Scrape failed", NETWORK: "Connection lost",
@@ -41,7 +46,7 @@ function engText(e = {}) {
 }
 
 function SourceBadge({ source }) {
-  const s = SOURCE[source] || SOURCE.hn;
+  const s = SOURCE[source] || BADGE_ONLY[source] || SOURCE.web;
   return (
     <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${s.cls}`}>
       <s.Icon className="h-3 w-3" aria-hidden="true" /> {s.label}
@@ -106,13 +111,14 @@ function GapRow({ blog, open, onToggle, domain }) {
           <div className="flex flex-wrap items-center gap-2">
             <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${sev.cls}`}>{sev.label}</span>
             {blog.sources.map((s) => <SourceBadge key={s} source={s} />)}
-            {!blog.aiWritten && <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-400">Template copy</span>}
+            {!blog.aiWritten && <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-400">heuristic</span>}
           </div>
           <h3 className="mt-2 text-base font-semibold text-zinc-100">{blog.title}</h3>
           <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
             <span className="break-all">{blog.path}</span>
             <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" aria-hidden="true" />{blog.updated ? `Updated ${fmtDate(blog.updated)}` : "No date found"}</span>
-            <span>{blog.harvested} live items</span>
+            <span>{blog.harvested} harvested → {blog.keptCount ?? blog.intents.length} relevant</span>
+            {blog.compScore != null && <span>Competitor gap {blog.compScore}/100 · Social gap {blog.socialScore}/100</span>}
           </p>
         </div>
         <div className="flex items-center gap-4 md:w-56">
@@ -143,7 +149,7 @@ function GapRow({ blog, open, onToggle, domain }) {
               </section>
               <section>
                 <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-400"><Quote className="h-3.5 w-3.5" aria-hidden="true" />Live Harvested Internet Intent</h4>
-                {blog.intents.length === 0 ? <p className="mt-2 text-sm text-zinc-500">No on-topic discussions in the last 30 days.</p> : (
+                {blog.intents.length === 0 ? <p className="mt-2 text-sm text-zinc-500">No on-topic discussions survived the relevance filter (last 90 days).</p> : (
                 <ul className="mt-2 space-y-2">
                   {blog.intents.map((q, i) => (
                     <li key={i} className="rounded-xl border-l-2 border-indigo-500/60 bg-zinc-950/60 p-3">
@@ -152,8 +158,21 @@ function GapRow({ blog, open, onToggle, domain }) {
                         {q.text && q.text !== q.title && <p className="mt-1 line-clamp-3 text-[13px] leading-relaxed text-zinc-400">“{q.text}”</p>}
                       </a>
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
-                        <SourceBadge source={q.source} /><span>{q.handle}</span><span>· {relTime(q.created)}</span>{engText(q.engagement) && <span>· {engText(q.engagement)}</span>}
+                        <SourceBadge source={q.source} />{q.sim != null && <span>sim {q.sim}</span>}<span>{q.handle}</span><span>· {relTime(q.created)}</span>{engText(q.engagement) && <span>· {engText(q.engagement)}</span>}
                       </div>
+                    </li>
+                  ))}
+                </ul>)}
+              </section>
+              <section>
+                <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-400"><Swords className="h-3.5 w-3.5" aria-hidden="true" />Competitor Coverage (70% weight)</h4>
+                {!blog.competitors?.length ? <p className="mt-2 text-sm text-zinc-500">No competitor page closely matches this post.</p> : (
+                <ul className="mt-2 space-y-2">
+                  {blog.competitors.map((m, i) => (
+                    <li key={i} className="rounded-xl border-l-2 border-fuchsia-500/60 bg-zinc-950/60 p-3">
+                      <a href={m.url} target="_blank" rel="noopener noreferrer nofollow" className="text-sm font-medium text-zinc-100 hover:text-fuchsia-300">{m.title}<ExternalLink className="ml-1 inline h-3 w-3 opacity-60" aria-hidden="true" /></a>
+                      <p className="mt-1 text-[11px] text-zinc-500">{m.competitor} · sim {m.sim}</p>
+                      {m.missing?.length > 0 && <p className="mt-1 text-[12px] text-zinc-400">They cover, you don't: {m.missing.join("; ")}</p>}
                     </li>
                   ))}
                 </ul>)}
@@ -192,8 +211,9 @@ export default function SearchIntentInterceptor() {
   const [openId, setOpenId] = useState(null);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("severity");
-  const [sources, setSources] = useState({ x: true, reddit: true, github: true, hn: true });
+  const [sources, setSources] = useState({ web: true, so: true, devto: true, x: true, reddit: true, github: true, hn: true });
   const [config, setConfig] = useState(null);
+  const [competitors, setCompetitors] = useState(params.get("competitors") || "");
   const esRef = useRef(null);
   const logRef = useRef(null);
 
@@ -217,12 +237,14 @@ export default function SearchIntentInterceptor() {
     setScanning(true); setTab("pipeline"); setOpenId(null); setBlogs([]); setSummary(null); setMeta(null);
     setStepState(PIPELINE_STEPS.map(() => "pending")); setLogs([]);
     const qs = new URLSearchParams({ url: target });
+    if (competitors.trim()) qs.set("competitors", competitors.trim());
     Object.entries(sources).forEach(([k, v]) => { if (!v) qs.set(k, "0"); });
     const es = new EventSource(`/api/scan?${qs}`);
     esRef.current = es;
     es.addEventListener("log", (e) => { const d = JSON.parse(e.data); addLog(d.text, d.kind); });
     es.addEventListener("step", (e) => { const d = JSON.parse(e.data); setStepState((prev) => prev.map((s, j) => (j === d.i ? d.state : s))); });
     es.addEventListener("meta", (e) => setMeta(JSON.parse(e.data)));
+    es.addEventListener("competitors", (e) => { const d = JSON.parse(e.data); if (d.list?.length) setCompetitors(d.list.join(", ")); });
     es.addEventListener("post", (e) => { const row = JSON.parse(e.data); setBlogs((b) => [...b, row]); });
     es.addEventListener("done", (e) => {
       fetch("/api/config").then((r) => r.json()).then(setConfig).catch(() => {});
@@ -235,7 +257,7 @@ export default function SearchIntentInterceptor() {
       if (!esRef.current) return;
       setError({ code: "NETWORK", message: "Lost connection to the scan server." }); addLog("✗ Lost connection to the scan server.", "err"); finish();
     };
-  }, [url, sources, params]);
+  }, [url, sources, params, competitors]);
 
   const cancel = () => { finish(); addLog("✗ Scan cancelled by user.", "err"); setStepState((p) => p.map((s) => (s === "running" ? "failed" : s))); };
 
@@ -250,7 +272,7 @@ export default function SearchIntentInterceptor() {
   }, [blogs, query, sort, sources]);
 
   const live = blogs.length > 0;
-  const gaps = blogs.filter((b) => b.severity !== "low").length;
+  const gaps = blogs.filter((b) => b.status !== "no_gap" && b.score < 80).length;
   const avg = blogs.length ? Math.round(blogs.reduce((a, b) => a + b.score, 0) / blogs.length) : null;
 
   const TABS = [
@@ -291,7 +313,7 @@ export default function SearchIntentInterceptor() {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Where is your content losing the conversation?</h1>
-            <p className="mt-1 text-sm text-zinc-400">Scan any site's real blog posts against live developer friction on Reddit, GitHub, Hacker News{srcCfg.x?.configured ? " and X" : ""}.</p>
+            <p className="mt-1 text-sm text-zinc-400">Scan any site's real blog posts against competitor content (70%) and live discussion (30%) across the web, Stack Overflow, dev.to, Reddit, GitHub, Hacker News{srcCfg.x?.configured ? " and X" : ""}.</p>
           </div>
           {live && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300 ring-1 ring-emerald-500/30">
@@ -300,10 +322,11 @@ export default function SearchIntentInterceptor() {
           )}
         </div>
 
-        <section className="grid gap-4 sm:grid-cols-3" aria-label="Key metrics">
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Key metrics">
           <MetricCard icon={FileSearch} label="Total Blogs Scanned" value={blogs.length || "–"} hint={meta ? `${meta.content} content URLs found in ${meta.total} sitemap URLs` : "URLs parsed from sitemap"} accent="bg-indigo-500/15 text-indigo-300" />
-          <MetricCard icon={AlertTriangle} label="Active Gaps Found" value={live ? gaps : "–"} hint="Posts scoring below 75/100" accent="bg-rose-500/15 text-rose-300" />
-          <MetricCard icon={Gauge} label="AI Relevancy Score" value={avg != null ? `${avg}%` : "–"} hint={summary ? `Avg. across scanned posts · ${summary.mode.topics === "grok" ? "Grok" : "heuristic"} mode` : "Avg. across scanned posts"} accent="bg-emerald-500/15 text-emerald-300" />
+          <MetricCard icon={AlertTriangle} label="Active Gaps Found" value={live ? gaps : "–"} hint="Posts scoring below 80/100 (else: No active gap)" accent="bg-rose-500/15 text-rose-300" />
+          <MetricCard icon={Gauge} label="AI Relevancy Score" value={avg != null ? `${avg}%` : "–"} hint={summary ? `Avg. across scanned posts · ${summary.mode.topics === "grok" ? "Grok" : "heuristic"} mode · 70% competitor / 30% social` : "70% competitor / 30% social"} accent="bg-emerald-500/15 text-emerald-300" />
+          <MetricCard icon={Swords} label="Competitor Coverage" value={summary?.competitorCoverage ? `${summary.competitorCoverage.covered}/${summary.competitorCoverage.total}` : "–"} hint={summary?.competitors?.length ? `Your posts that competitors also cover · ${summary.competitors.join(", ")}` : "Posts competitors also cover"} accent="bg-fuchsia-500/15 text-fuchsia-300" />
         </section>
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
@@ -323,7 +346,10 @@ export default function SearchIntentInterceptor() {
               </button>
             )}
           </form>
-          <p className="mt-2 text-xs text-zinc-500">Checks robots.txt, /sitemap.xml and /sitemap_index.xml, then scans the {config?.maxPosts || 15} newest blog or guide posts. A scan takes about 1–2 minutes.</p>
+          <label htmlFor="competitors" className="mt-3 block text-xs text-zinc-400">Competitors (optional, comma-separated domains; left empty = auto-discover 3–5)</label>
+          <input id="competitors" type="text" value={competitors} onChange={(e) => setCompetitors(e.target.value)} placeholder="firebase.google.com, neon.tech, planetscale.com"
+            className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2 font-mono text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+          <p className="mt-2 text-xs text-zinc-500">Checks robots.txt, /sitemap.xml and /sitemap_index.xml, then scans the {config?.maxPosts || 15} newest blog or guide posts. A scan takes about 2–4 minutes.</p>
           {error && (
             <div id="sitemap-err" role="alert" className="mt-3 flex items-start gap-2 rounded-xl bg-rose-500/10 p-3 text-sm text-rose-200 ring-1 ring-rose-500/30">
               <XCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
@@ -378,6 +404,16 @@ export default function SearchIntentInterceptor() {
 
           {tab === "matrix" && (
             <section aria-label="Gap analysis matrix">
+              {summary?.competitorCoverage?.uncovered?.length > 0 && (
+                <div className="mb-4 rounded-2xl border border-fuchsia-500/30 bg-fuchsia-500/5 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-fuchsia-300">Competitor coverage · topics they publish that no scanned post of yours covers</p>
+                  <ul className="mt-2 space-y-1 text-sm">
+                    {summary.competitorCoverage.uncovered.map((u) => (
+                      <li key={u.url}><a href={u.url} target="_blank" rel="noopener noreferrer nofollow" className="text-zinc-200 hover:text-fuchsia-300">{u.title}</a> <span className="text-xs text-zinc-500">· {u.competitor}</span></li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs font-semibold uppercase tracking-wider text-indigo-300">Steps 4–5 · Gap Analysis Matrix {meta && <span className="normal-case text-zinc-500">· {meta.origin}</span>}</p>
                 <div className="flex flex-col gap-2 sm:flex-row">
