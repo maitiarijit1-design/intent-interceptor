@@ -14,8 +14,8 @@ Dev mode with hot reload: `npm start` in one terminal and `npm run dev` in anoth
 ## Pipeline
 1. Sitemap ingestion and scraping of the newest posts (MAX_POSTS, default 15).
 2. Topics: corpus TF-IDF keyphrases (or Grok when XAI_API_KEY is set).
-3. Competitors: the optional "Competitors" input (comma-separated domains), else auto-discovered from free search ("brand alternatives / vs"), verified by homepage vocabulary. Their sitemaps are crawled (COMP_PAGES_PER_SITE, SSRF-guarded, low concurrency).
-4. Social listening: DuckDuckGo web (polite, rate-limited), Stack Exchange API, dev.to, Reddit, GitHub, HN and X (if X_BEARER_TOKEN; capped by X_MAX_POSTS_PER_SCAN). Queries include competitor brands.
+3. Competitors: the optional "Competitors" input (comma-separated domains), else auto-discovered from web search (Brave, DuckDuckGo fallback), HN and Reddit ("brand alternatives / vs"), verified by homepage vocabulary. Their sitemaps are crawled (COMP_PAGES_PER_SITE, SSRF-guarded, low concurrency).
+4. Social listening: web via Brave Search API when BRAVE_API_KEY is set (throttled to ~1 req/s, cached per scan, capped by BRAVE_MAX_QUERIES_PER_SCAN and BRAVE_MONTHLY_CAP, usage logged; the monthly counter resets on restart), else DuckDuckGo (polite, rate-limited); Stack Exchange API, dev.to, Reddit, GitHub, HN and X (if X_BEARER_TOKEN; capped by X_MAX_POSTS_PER_SCAN). Queries include competitor brands.
 5. Strict relevance: hiring/Show HN/weekly-thread/spam blocklist, 90-day window, at least 2 topic-term hits, a product-context term, and a BM25 cosine threshold (MIN_SIMILARITY). Competitor pages need MIN_COMP_SIMILARITY.
 6. Gap = 0.7 × competitor gap + 0.3 × social gap. Relevancy = 100 − gap. With nothing surviving, the post is marked "No active gap". Reasons and Markdown are extractive and cite the surviving URLs. Labelled "heuristic" unless Grok wrote them.
 

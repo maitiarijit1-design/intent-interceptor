@@ -16,7 +16,7 @@ export const GENERIC = /\b(who('?s| is) hiring|who wants to be hired|freelancer\
 /* ---------------- polite free web search (DuckDuckGo HTML, lite fallback) ---------------- */
 let lastWeb = 0; let webQueue = Promise.resolve(); export const webState = { status: null, until: 0 };
 function politeGap(ms = 1500) { const run = webQueue.then(async () => { const w = lastWeb + ms - Date.now(); if (w > 0) await new Promise((r) => setTimeout(r, w)); lastWeb = Date.now(); }); webQueue = run.catch(() => {}); return run; }
-export async function searchWeb(q, { signal, recent = true } = {}) {
+export async function searchDDG(q, { signal, recent = true } = {}) {
   if (webState.status && Date.now() < webState.until) throw new FetchError("web search temporarily blocked (bot check), skipped", "BLOCKED");
   await politeGap();
   const body = new URLSearchParams({ q, ...(recent ? { df: "m" } : {}) }).toString();
@@ -38,6 +38,57 @@ export async function searchWeb(q, { signal, recent = true } = {}) {
     out.push({ source: "web", title: a.text().trim(), text: snip.replace(/\s+/g, " ").trim().slice(0, 300), handle: new URL(url).hostname.replace(/^www\./, ""), url, created: null, engagement: {} });
   });
   return out.slice(0, 12);
+}
+
+/* ---------------- Brave Search API (primary web source when BRAVE_API_KEY is set) ---------------- */
+// Free tier: ~1 req/s and a monthly cap. We throttle, cache per scan, cap queries per scan and count usage.
+export const braveState = { scanQueries: 0, scanCached: 0, month: new Date().toISOString().slice(0, 7), monthQueries: 0, status: null, cache: new Map(), fallbacks: 0 };
+const BRAVE_PER_SCAN = () => Number(process.env.BRAVE_MAX_QUERIES_PER_SCAN || 40);
+const BRAVE_MONTHLY = () => Number(process.env.BRAVE_MONTHLY_CAP || 2000);
+let braveLast = 0; let braveChain = Promise.resolve();
+export function resetWebScan() { braveState.scanQueries = 0; braveState.scanCached = 0; braveState.fallbacks = 0; braveState.cache.clear(); }
+async function braveSlot() { const p = braveChain.then(async () => { const wait = braveLast + 1100 - Date.now(); if (wait > 0) await new Promise((r) => setTimeout(r, wait)); braveLast = Date.now(); }); braveChain = p.catch(() => {}); return p; }
+export async function searchBrave(q, { signal, recent = true } = {}) {
+  const key = process.env.BRAVE_API_KEY; if (!key) throw new FetchError("BRAVE_API_KEY not set", "NO_KEY");
+  const ck = `${recent ? 1 : 0}|${q.toLowerCase()}`; if (braveState.cache.has(ck)) { braveState.scanCached++; return braveState.cache.get(ck); }
+  const m = new Date().toISOString().slice(0, 7); if (m !== braveState.month) { braveState.month = m; braveState.monthQueries = 0; }
+  if (braveState.scanQueries >= BRAVE_PER_SCAN()) throw new FetchError(`Brave per-scan cap (${BRAVE_PER_SCAN()}) reached`, "CAP");
+  if (braveState.monthQueries >= BRAVE_MONTHLY()) throw new FetchError(`Brave monthly cap (${BRAVE_MONTHLY()}) reached`, "CAP");
+  if (braveState.status === "rate" && Date.now() < braveState.until) throw new FetchError("Brave rate limited", "RATE_LIMITED", 429);
+  await braveSlot();
+  const d = (t) => new Date(t).toISOString().slice(0, 10);
+  const params = new URLSearchParams({ q, count: "20", safesearch: "moderate", extra_snippets: "true", ...(recent ? { freshness: `${d(Date.now() - 90 * DAY)}to${d(Date.now())}` } : {}) });
+  braveState.scanQueries++; braveState.monthQueries++;
+  let r;
+  try { r = await fetch(`https://api.search.brave.com/res/v1/web/search?${params}`, { signal: AbortSignal.any([signal, AbortSignal.timeout(12000)].filter(Boolean)), headers: { accept: "application/json", "accept-encoding": "gzip", "x-subscription-token": key } }); }
+  catch (e) { if (signal?.aborted) throw new FetchError("aborted", "ABORTED"); throw new FetchError("Brave request failed", "NETWORK"); }
+  if (r.status === 429) { braveState.status = "rate"; braveState.until = Date.now() + 60000; throw new FetchError("Brave rate limited (429)", "RATE_LIMITED", 429); }
+  if (r.status === 401 || r.status === 403) { braveState.status = "auth"; throw new FetchError(`Brave rejected the key (HTTP ${r.status})`, "AUTH", r.status); }
+  if (!r.ok) {
+    let code = ""; try { code = (await r.json())?.error?.code || ""; } catch {}
+    if (/TOKEN|AUTH|SUBSCRIPTION/i.test(code)) { braveState.status = "auth"; throw new FetchError(`Brave rejected the key (${code})`, "AUTH", r.status); }
+    if (/RATE|QUOTA|LIMIT/i.test(code)) { braveState.status = "rate"; braveState.until = Date.now() + 60000; throw new FetchError(`Brave limit hit (${code})`, "RATE_LIMITED", r.status); }
+    throw new FetchError(`Brave HTTP ${r.status}${code ? ` (${code})` : ""}`, "HTTP", r.status);
+  }
+  braveState.status = "ok";
+  const j = await r.json();
+  const strip = (x) => String(x || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  const out = (j.web?.results || []).map((it) => {
+    let host = ""; try { host = new URL(it.url).hostname.replace(/^www\./, ""); } catch {}
+    const created = Date.parse(it.page_age || "") || null;
+    return { source: "web", title: strip(it.title), text: strip([it.description, ...(it.extra_snippets || [])].join(" ")).slice(0, 600), handle: host, url: it.url, created, engagement: {}, via: "brave" };
+  }).filter((x) => x.url);
+  braveState.cache.set(ck, out);
+  return out;
+}
+
+// Web search: Brave first (if key, under caps), DuckDuckGo fallback
+export async function searchWeb(q, opts = {}) {
+  if (process.env.BRAVE_API_KEY && braveState.status !== "auth") {
+    try { return await searchBrave(q, opts); }
+    catch (e) { if (e.code === "ABORTED") throw e; braveState.fallbacks++; braveState.lastError = e.message; }
+  }
+  return searchDDG(q, opts);
 }
 
 /* ---------------- Stack Overflow (Stack Exchange API, keyless) ---------------- */

@@ -4,10 +4,11 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { assertPublicUrl } from "./net.js";
 import * as P from "./pipeline.js";
+import * as F from "./free.js";
 
 // tiny .env loader (no dependency)
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-for (const f of [".env", ".env.x", ".env.xai"]) { try { for (const l of fs.readFileSync(path.join(root, f), "utf8").split("\n")) { const m = l.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)\s*$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim().replace(/^["']|["']$/g, ""); } } catch {} }
+for (const f of [".env", ".env.x", ".env.xai", ".env.brave"]) { try { for (const l of fs.readFileSync(path.join(root, f), "utf8").split("\n")) { const m = l.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)\s*$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim().replace(/^["']|["']$/g, ""); } } catch {} }
 
 const app = express();
 app.set("trust proxy", true);
@@ -23,7 +24,7 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
 app.get("/api/config", (_req, res) => {
   const c = P.cfg();
   res.json({
-    sources: { web: { configured: true, auth: "free · DuckDuckGo" }, so: { configured: true, auth: "free API" }, devto: { configured: true, auth: "free API" }, reddit: { configured: true, auth: "public" }, github: { configured: true, auth: c.github ? "token" : "unauthenticated" }, hn: { configured: true, auth: "public" }, x: { configured: c.x, auth: !c.x ? "not connected" : P.sourceState.x.status === "credits" ? "connected · credits depleted" : P.sourceState.x.status === "rate" ? "connected · rate limited" : "bearer token", status: P.sourceState.x.status } },
+    sources: { web: { configured: true, auth: process.env.BRAVE_API_KEY ? `Brave Search API (${F.braveState.monthQueries}/${process.env.BRAVE_MONTHLY_CAP || 2000} this month, since restart) · DuckDuckGo fallback` : "free · DuckDuckGo (set BRAVE_API_KEY for Brave)" }, so: { configured: true, auth: "free API" }, devto: { configured: true, auth: "free API" }, reddit: { configured: true, auth: "public" }, github: { configured: true, auth: c.github ? "token" : "unauthenticated" }, hn: { configured: true, auth: "public" }, x: { configured: c.x, auth: !c.x ? "not connected" : P.sourceState.x.status === "credits" ? "connected · credits depleted" : P.sourceState.x.status === "rate" ? "connected · rate limited" : "bearer token", status: P.sourceState.x.status } },
     ai: { grok: c.xai, model: c.xai ? c.xaiModel : null }, maxPosts: Number(process.env.MAX_POSTS || 15), limits: { scansPer15Min: PER_WINDOW },
   });
 });
@@ -93,8 +94,9 @@ app.get("/api/scan", async (req, res) => {
     step(2, "done"); step(3, "running");
 
     // ---------- Competitors (70% weight) ----------
-    const F = await import("./free.js");
+
     const COMP_PAGES = Number(process.env.COMP_PAGES_PER_SITE || 8);
+    F.resetWebScan();
     const ownHost = new URL(input).hostname.replace(/^www\./, "");
     let competitors = String(req.query.competitors || "").split(/[,\s]+/).map((s) => s.trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./, "").toLowerCase()).filter((s) => /\.[a-z]{2,}$/.test(s) && !s.endsWith(ownHost)).slice(0, 5);
     if (competitors.length) log(`🏁 Competitors (from input): ${competitors.join(", ")}`);
@@ -121,7 +123,7 @@ app.get("/api/scan", async (req, res) => {
 
     // ---------- Social listening (30% weight) ----------
     const names = [want.web && "Web", want.so && "Stack Overflow", want.devto && "dev.to", want.x && "X", want.reddit && "Reddit", want.github && "GitHub", want.hn && "Hacker News"].filter(Boolean);
-    log(`🔍 Tracing live friction points on X, Reddit, and GitHub... (live sources: ${names.join(", ")}${c.x ? "" : "; X not connected"}; competitor brands included in queries)`);
+    log(`🔍 Tracing live discussion on ${names.join(", ")}${want.web ? ` (web via ${process.env.BRAVE_API_KEY ? "Brave Search, DuckDuckGo fallback" : "DuckDuckGo"})` : ""}...${c.x ? "" : " (X not connected)"} Competitor brands are included in queries.`);
     const counts = { reddit: 0, github: 0, hn: 0, x: 0, web: 0, so: 0, devto: 0 }; const kept = { ...counts }; const warned = new Set();
     const finder = { web: F.searchWeb, so: F.searchSO, reddit: P.searchReddit, github: P.searchGitHub, hn: P.searchHN, x: P.searchX };
     const compBrands = competitors.map((d) => F.brandOf(d));
@@ -180,6 +182,7 @@ app.get("/api/scan", async (req, res) => {
       log(`   ✓ ${p.title.slice(0, 55)} → ${items.length} harvested, ${fr.kept.length} relevant · competitor ${comp.signal}/100 · social ${social}/100 → relevancy ${score}/100${narr.status === "no_gap" ? " (no active gap)" : ""}`, "muted");
     });
     if (signal.aborted) throw Object.assign(new Error("aborted"), { code: "ABORTED" });
+    if (want.web) log(process.env.BRAVE_API_KEY ? `   Brave Search: ${F.braveState.scanQueries} API queries this scan (cap ${process.env.BRAVE_MAX_QUERIES_PER_SCAN || 40}), ${F.braveState.scanCached} served from cache, ${F.braveState.monthQueries} this month since restart (cap ${process.env.BRAVE_MONTHLY_CAP || 2000})${F.braveState.fallbacks ? `; ${F.braveState.fallbacks} fell back to DuckDuckGo (${F.braveState.lastError})` : ""}` : "   Web: BRAVE_API_KEY not set, DuckDuckGo only", "info");
     if (want.x) log(`   X: ${xRead} posts read, about $${(xRead * 0.005).toFixed(2)} estimated API spend${P.sourceState.x.status === "credits" ? " (API credits depleted, X skipped)" : ""}`, "info");
     log(`   Harvested → relevant: Web ${counts.web}→${kept.web} · Stack Overflow ${counts.so}→${kept.so} · dev.to ${counts.devto}→${kept.devto} · Reddit ${counts.reddit}→${kept.reddit} · GitHub ${counts.github}→${kept.github} · HN ${counts.hn}→${kept.hn} · X ${c.x ? `${counts.x}→${kept.x}` : "not connected"}`, "info");
     log(`   Dropped: ${dropTotals.generic} generic/hiring/spam, ${dropTotals.offTopic} with <2 topic terms, ${dropTotals.lowSim} below similarity threshold, ${dropTotals.stale} older than 90 days, ${dropTotals.noUrl} without URL`, "muted");
