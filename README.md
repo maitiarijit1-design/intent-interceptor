@@ -38,3 +38,11 @@ SSE needs a host that doesn't buffer responses. The server sends `X-Accel-Buffer
 - Unauthenticated GitHub search allows 10 requests/min per IP. Set `GITHUB_TOKEN` for 30/min.
 - Sites behind bot protection (Cloudflare challenges and similar) or without a sitemap can't be scanned. The UI shows a clear error.
 - The heuristic mode is keyword-based. Grok mode gives much sharper topics, queries and gap copy.
+
+## SEO & Keywords tab (free)
+- **On-page audit** per scanned post: title/meta length, H1 & heading hierarchy, canonical, Open Graph, JSON-LD schema, image alt coverage, internal/external links, word count, Flesch readability, fetch time → 0–100 score with fix-it items.
+- **Keywords**: TF-IDF over 1–3-word phrases (title/headings weighted), per post and site-wide, with body density.
+- **Competitor overlap**: shared, competitor-only and you-only keywords, each linked to the page.
+- **Keyword ideas**: autocomplete from Google suggest, DuckDuckGo and Bing; each source's status is shown, and the scan degrades gracefully if one is blocked.
+- **Rank tracking**: the top `SEO_RANK_KEYWORDS` (default 10, max 20) keywords are checked for your domain and each competitor in Brave's top 20 (when `BRAVE_API_KEY` is set), otherwise DuckDuckGo, labeled *best effort*. No Google SERP scraping.
+- **Rank history is stored in the browser's localStorage** (key `ii-rank-history:<site>`, last 30 scans), because Render's free plan has no persistent disk. History is per browser.

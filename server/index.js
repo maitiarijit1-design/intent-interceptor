@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { assertPublicUrl } from "./net.js";
 import * as P from "./pipeline.js";
 import * as F from "./free.js";
+import * as S from "./seo.js";
 
 // tiny .env loader (no dependency)
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -114,7 +115,7 @@ app.get("/api/scan", async (req, res) => {
         const cd = await P.discoverUrls(`https://${dom}`, { signal, log: () => {}, maxPosts: 0 });
         const ranked = F.rankCompetitorUrls(cd.content, topicWords, COMP_PAGES);
         const pages = (await pool(ranked, 3, async (u) => { try { return await P.scrapePost(u, { signal }); } catch { return null; } })).filter(Boolean);
-        for (const pg of pages) compPages.push({ competitor: dom, title: pg.title, url: pg.url, headers: pg.headers, tokens: F.toks(`${pg.title} ${pg.title} ${pg.title} ${pg.headers.join(" ")} ${pg.headers.join(" ")} ${pg.description} ${pg.bodyText.slice(0, 6000)}`), pg });
+        for (const pg of pages) compPages.push({ competitor: dom, title: pg.title, url: pg.url, headers: pg.headers, description: pg.description, bodyText: pg.bodyText, tokens: F.toks(`${pg.title} ${pg.title} ${pg.title} ${pg.headers.join(" ")} ${pg.headers.join(" ")} ${pg.description} ${pg.bodyText.slice(0, 6000)}`), pg });
         compStats[dom] = { urls: cd.contentCount, crawled: pages.length };
         log(`   ↳ ${dom}: ${cd.contentCount} content URLs in sitemap, ${ranked.length} topic-matched, ${pages.length} crawled`, "muted");
       } catch (e) { if (signal.aborted) return; compStats[dom] = { urls: 0, crawled: 0, error: e.message }; log(`   ⚠ ${dom}: ${e.message}`, "warn"); }
@@ -193,6 +194,23 @@ app.get("/api/scan", async (req, res) => {
     const covered = results.filter((r) => r.competitors.length).length;
     const avg = results.length ? Math.round(results.reduce((a, b) => a + b.score, 0) / results.length) : 0;
     log(`✅ Gap analysis complete (${c.xai ? "Grok-assisted" : "heuristic, free sources"}). ${gaps} of ${results.length} posts flagged. Average relevancy ${avg}/100. Competitors cover ${covered}/${results.length} of your topics; ${uncovered.length} competitor pages have no matching post on your site.`, "ok");
+    // ---------------- SEO & keyword tracker ----------------
+    let seoOut = null;
+    if (req.query.seo !== "0") {
+      try {
+        log("📈 SEO & keywords: on-page audit, TF-IDF keywords, competitor overlap, autocomplete ideas, rank tracking...", "info");
+        const kw = S.keywords(posts, { top: 12 });
+        const ov = S.overlap(posts, compPages);
+        const seeds = kw.site.slice(0, 4).map((k) => k.keyword);
+        const id = await S.ideas(seeds.length ? seeds : [brand], { signal, log });
+        const N = Math.min(Number(process.env.SEO_RANK_KEYWORDS || 10), 20);
+        const rk = await S.ranks(kw.site.map((k) => k.keyword), [ownHost, ...competitors.map((d) => d.replace(/^www\./, ""))], { signal, log, max: N });
+        const audits = posts.map((p) => ({ title: p.title, url: p.url, ...(p.seo || { score: null, fixes: ["Audit unavailable"] }), keywords: kw.per[posts.indexOf(p)] }));
+        seoOut = { audits, avgScore: Math.round(audits.filter((a) => a.score != null).reduce((a, b) => a + b.score, 0) / Math.max(1, audits.filter((a) => a.score != null).length)), siteKeywords: kw.site, overlap: ov, ideas: id, ranks: { ...rk, domains: [ownHost, ...competitors], at: Date.now(), site: ownHost } };
+        send("seo", seoOut);
+        log(`   SEO: average on-page score ${seoOut.avgScore}/100 · ${kw.site.length} site keywords · ${ov.shared.length} shared / ${ov.compOnly.length} competitor-only keywords · ${id.list.length} autocomplete ideas (${Object.entries(id.status).map(([k, v]) => `${k} ${v === "ok" ? "ok" : "blocked"}`).join(", ")}) · ranks via ${rk.engine}${rk.engine === "brave" ? "" : " (best effort)"}`, "info");
+      } catch (e) { if (signal.aborted) throw e; log(`   ⚠ SEO module failed: ${e.message}`, "warn"); }
+    }
     send("done", { scanned: results.length, gaps, score: avg, counts, kept, competitors, compStats, competitorCoverage: { covered, total: results.length, uncovered }, mode: { topics: c.xai ? "grok" : "heuristic", narrative: c.xai ? "grok" : "extractive" } });
     res.end();
   } catch (e) {

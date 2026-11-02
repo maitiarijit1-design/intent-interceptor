@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import { audit } from "./seo.js";
 import { safeFetchText, apiJson, FetchError } from "./net.js";
 
 const XAI_URL = "https://api.x.ai/v1/chat/completions";
@@ -63,8 +64,11 @@ export async function discoverUrls(input, { signal, log, maxPosts }) {
 
 /* ---------------------------- 2. Scrape ---------------------------- */
 export async function scrapePost(u, { signal }) {
+  const t0 = Date.now();
   const { text, finalUrl, contentType } = await safeFetchText(u.loc, { signal, timeout: 15000, accept: "text/html,*/*" });
+  const ms = Date.now() - t0;
   if (!/html/i.test(contentType) && !/<html/i.test(text.slice(0, 2000))) throw new FetchError("Not HTML", "NOT_HTML");
+  let seo = null; try { seo = audit(text, finalUrl, ms); } catch {}
   const $ = cheerio.load(text);
   $("script,style,noscript,svg,nav,footer,header,aside,form").remove();
   const meta = (n) => $(`meta[name="${n}"],meta[property="${n}"]`).attr("content")?.trim();
@@ -80,7 +84,7 @@ export async function scrapePost(u, { signal }) {
     url: finalUrl, path: new URL(finalUrl).pathname, title: title.slice(0, 200),
     description: (meta("description") || meta("og:description") || "").slice(0, 400),
     headers, published, modified, date: modified || published,
-    excerpt: body.slice(0, 600), bodyText: body.slice(0, 60000).toLowerCase(),
+    excerpt: body.slice(0, 600), bodyText: body.slice(0, 60000).toLowerCase(), seo,
   };
 }
 

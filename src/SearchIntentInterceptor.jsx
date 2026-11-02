@@ -4,6 +4,8 @@ import {
   Search, GitBranch, MessageSquare, AtSign, Settings, LayoutGrid, Workflow, Tag, Quote, Lightbulb, Clock, ExternalLink,
   ArrowUpDown, Sparkles, Flame, Square, KeyRound, Wifi, XCircle, Globe, HelpCircle, Newspaper, Swords,
 } from "lucide-react";
+import SeoPanel, { saveRankHistory } from "./SeoPanel.jsx";
+import { TrendingUp } from "lucide-react";
 
 const PIPELINE_STEPS = [
   { id: 1, label: "Sitemap ingestion" }, { id: 2, label: "Content scraping" }, { id: 3, label: "Topic extraction" },
@@ -213,6 +215,7 @@ export default function SearchIntentInterceptor() {
   const [sort, setSort] = useState("severity");
   const [sources, setSources] = useState({ web: true, so: true, devto: true, x: true, reddit: true, github: true, hn: true });
   const [config, setConfig] = useState(null);
+  const [seo, setSeo] = useState(null);
   const [competitors, setCompetitors] = useState(params.get("competitors") || "");
   const esRef = useRef(null);
   const logRef = useRef(null);
@@ -234,7 +237,7 @@ export default function SearchIntentInterceptor() {
       if (!/^https?:$/.test(p.protocol) || !p.hostname.includes(".")) throw new Error();
     } catch { setError({ code: "BAD_URL", message: "Enter a valid URL, e.g. https://supabase.com" }); return; }
     setError(null); esRef.current?.close();
-    setScanning(true); setTab("pipeline"); setOpenId(null); setBlogs([]); setSummary(null); setMeta(null);
+    setScanning(true); setTab("pipeline"); setOpenId(null); setBlogs([]); setSummary(null); setMeta(null); setSeo(null);
     setStepState(PIPELINE_STEPS.map(() => "pending")); setLogs([]);
     const qs = new URLSearchParams({ url: target });
     if (competitors.trim()) qs.set("competitors", competitors.trim());
@@ -245,6 +248,7 @@ export default function SearchIntentInterceptor() {
     es.addEventListener("step", (e) => { const d = JSON.parse(e.data); setStepState((prev) => prev.map((s, j) => (j === d.i ? d.state : s))); });
     es.addEventListener("meta", (e) => setMeta(JSON.parse(e.data)));
     es.addEventListener("competitors", (e) => { const d = JSON.parse(e.data); if (d.list?.length) setCompetitors(d.list.join(", ")); });
+    es.addEventListener("seo", (e) => { const d = JSON.parse(e.data); saveRankHistory(d); setSeo(d); });
     es.addEventListener("post", (e) => { const row = JSON.parse(e.data); setBlogs((b) => [...b, row]); });
     es.addEventListener("done", (e) => {
       fetch("/api/config").then((r) => r.json()).then(setConfig).catch(() => {});
@@ -278,6 +282,7 @@ export default function SearchIntentInterceptor() {
   const TABS = [
     { id: "pipeline", label: "Pipeline", Icon: Workflow },
     { id: "matrix", label: "Gap Matrix", Icon: LayoutGrid, badge: blogs.length || null },
+    { id: "seo", label: "SEO & Keywords", Icon: TrendingUp, badge: seo?.avgScore ?? null },
     { id: "settings", label: "Settings", Icon: Settings },
   ];
   const srcCfg = config?.sources || {};
@@ -451,6 +456,8 @@ export default function SearchIntentInterceptor() {
               )}
             </section>
           )}
+
+          {tab === "seo" && <SeoPanel seo={seo} />}
 
           {tab === "settings" && (
             <div className="grid gap-4 lg:grid-cols-2">
